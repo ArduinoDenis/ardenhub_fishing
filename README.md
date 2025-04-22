@@ -53,15 +53,11 @@ The `config.lua` file allows you to customize:
 - Fishing Zones: Designated places for fishing
 - Fish Market: Sell your catch
 
-## 📝 Commands
-
-No specific commands are needed. Everything works through interactions with NPCs and designated zones.
-
 ## 🔧 Support
 
 For support, you can:
 - Open an issue on GitHub
-- Contact the author on Discord
+- Contact the author on [Discord Official](https://discord.gg/s9bjshtmjG)
 
 ## 👨‍💻 Author
 

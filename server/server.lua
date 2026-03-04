@@ -1,221 +1,349 @@
-local ESX = exports["es_extended"]:getSharedObject()
+-- ═══════════════════════════════════════════════════════════
+-- ARDENHUB FISHING - SERVER
+-- ═══════════════════════════════════════════════════════════
 
--- Discord webhook function
-function SendDiscordWebhook(webhookData, message, fields)
-    if not Config.Webhooks.enabled then return end
+local ESX = exports["es_extended"]:getSharedObject()
+local playerActions = {}
+
+-- ═══════════════════════════════════════════════════════════
+-- ANTI-EXPLOIT SYSTEM
+-- ═══════════════════════════════════════════════════════════
+function CheckExploit(source)
+    if not Config.AntiExploit.enabled then return false end
+    
+    local identifier = GetPlayerIdentifier(source, 0)
+    local currentTime = os.time()
+    
+    if not playerActions[identifier] then
+        playerActions[identifier] = {
+            actions = {},
+            lastReset = currentTime
+        }
+    end
+    
+    local playerData = playerActions[identifier]
+    
+    
+    if currentTime - playerData.lastReset >= 60 then
+        playerData.actions = {}
+        playerData.lastReset = currentTime
+    end
+    
+    table.insert(playerData.actions, currentTime)
+    
+    if #playerData.actions > Config.AntiExploit.maxActionsPerMinute then
+        if Config.AntiExploit.logToDiscord then
+            SendDiscordLog('exploit', {
+                title = '🚨 Possibile Exploit Rilevato',
+                description = 'Giocatore: ' .. GetPlayerName(source) .. ' (ID: ' .. source .. ')',
+                color = 15158332,
+                fields = {
+                    {name = 'Azioni al minuto', value = tostring(#playerData.actions), inline = true},
+                    {name = 'Limite', value = tostring(Config.AntiExploit.maxActionsPerMinute), inline = true}
+                }
+            })
+        end
+        
+        if Config.AntiExploit.kickOnExploit then
+            DropPlayer(source, 'Anti-Exploit: Troppe azioni rilevate')
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- DISCORD WEBHOOK
+-- ═══════════════════════════════════════════════════════════
+function SendDiscordLog(logType, data)
+    if not Config.Webhooks.enabled or not Config.Webhooks.url or Config.Webhooks.url == "" then 
+        return 
+    end
     
     local embed = {
         {
-            ["color"] = webhookData.color,
-            ["title"] = webhookData.title,
-            ["description"] = message,
-            ["footer"] = {
-                ["text"] = webhookData.footer .. " • " .. os.date("%d/%m/%Y %H:%M:%S")
-            },
-            ["fields"] = fields or {}
+            title = data.title or "Log Sistema Pesca",
+            description = data.description or "",
+            color = data.color or Config.Webhooks.color,
+            fields = data.fields or {},
+            footer = {
+                text = Config.Webhooks.footer .. " • " .. os.date("%d/%m/%Y %H:%M:%S")
+            }
         }
     }
     
-    PerformHttpRequest(webhookData.url, function(err, text, headers) end, 'POST', json.encode({embeds = embed}), { ['Content-Type'] = 'application/json' })
+    PerformHttpRequest(Config.Webhooks.url, function(err, text, headers) 
+    end, 'POST', json.encode({embeds = embed}), {['Content-Type'] = 'application/json'})
 end
 
--- Check if player has fishing rod and bait
-ESX.RegisterServerCallback('ardenhub_fishing:hasItems', function(source, cb)
+-- ═══════════════════════════════════════════════════════════
+-- CALLBACK: CONTROLLA ITEMS
+-- ═══════════════════════════════════════════════════════════
+ESX.RegisterServerCallback('ardenhub_fishing:checkItems', function(source, cb)
     local xPlayer = ESX.GetPlayerFromId(source)
+    if not xPlayer then return cb(false, false) end
+    
     local hasRod = xPlayer.getInventoryItem(Config.FishingRodItem).count > 0
     local hasBait = xPlayer.getInventoryItem(Config.BaitItem).count > 0
     
     cb(hasRod, hasBait)
 end)
 
--- Remove bait when fishing starts
-RegisterServerEvent('ardenhub_fishing:removeBait')
-AddEventHandler('ardenhub_fishing:removeBait', function()
+-- ═══════════════════════════════════════════════════════════
+-- EVENT: CONSUMA ESCA
+-- ═══════════════════════════════════════════════════════════
+RegisterNetEvent('ardenhub_fishing:consumeBait', function()
+    local source = source
     local xPlayer = ESX.GetPlayerFromId(source)
-    xPlayer.removeInventoryItem(Config.BaitItem, 1)
+    if not xPlayer then return end
     
-    if Config.Webhooks.enabled then
-        local playerName = GetPlayerName(source)
-        local message = "**" .. playerName .. "** (ID: " .. source .. ") started fishing"
-        SendDiscordWebhook(Config.Webhooks.fishing, message)
+    if math.random(100) <= Config.BaitConsumeChance then
+        xPlayer.removeInventoryItem(Config.BaitItem, 1)
     end
 end)
 
--- Catch fish event
-RegisterServerEvent('ardenhub_fishing:catchFish')
-AddEventHandler('ardenhub_fishing:catchFish', function()
+-- ═══════════════════════════════════════════════════════════
+-- EVENT: PESCA PESCE
+-- ═══════════════════════════════════════════════════════════
+RegisterNetEvent('ardenhub_fishing:catchFish', function(zoneBonus)
+    local source = source
     local xPlayer = ESX.GetPlayerFromId(source)
+    if not xPlayer then return end
     
-    -- Determine which fish was caught based on probability
+    
+    if CheckExploit(source) then return end
+    
+    if math.random(100) <= Config.BaitConsumeChance then
+        xPlayer.removeInventoryItem(Config.BaitItem, 1)
+    end
+    
     local totalChance = 0
-    local fishChances = {}
-    
-    for i, fish in ipairs(Config.FishTypes) do
+    for _, fish in ipairs(Config.FishTypes) do
         totalChance = totalChance + fish.chance
-        table.insert(fishChances, {
-            fish = fish,
-            minChance = totalChance - fish.chance,
-            maxChance = totalChance
-        })
     end
     
     local roll = math.random(1, totalChance)
     local caughtFish = nil
+    local currentChance = 0
     
-    for i, chance in ipairs(fishChances) do
-        if roll > chance.minChance and roll <= chance.maxChance then
-            caughtFish = chance.fish
+    for _, fish in ipairs(Config.FishTypes) do
+        currentChance = currentChance + fish.chance
+        if roll <= currentChance then
+            caughtFish = fish
             break
         end
     end
     
-    if caughtFish then
-        local weight = math.random(caughtFish.weight.min * 10, caughtFish.weight.max * 10) / 10
+    if not caughtFish then
+        caughtFish = Config.FishTypes[1] 
+    end
+    
+    local weight = math.random(caughtFish.weight.min * 10, caughtFish.weight.max * 10) / 10
+    
+    if xPlayer.canCarryItem(caughtFish.item, 1) then
+        xPlayer.addInventoryItem(caughtFish.item, 1)
         
-        if xPlayer.canCarryItem(caughtFish.item, 1) then
-            xPlayer.addInventoryItem(caughtFish.item, 1, {
-                weight = weight,
-                type = caughtFish.name
-            })
-            
-            TriggerClientEvent('ardenhub_fishing:notify', source, 'Fishing', 
-                string.format(Config.Notifications.caughtFish, caughtFish.name, weight), 
-                3000, 'success')
-                
-            if Config.Webhooks.enabled then
-                local playerName = GetPlayerName(source)
-                local message = "**" .. playerName .. "** (ID: " .. source .. ") caught a fish"
-                local fields = {
-                    {
-                        ["name"] = "Fish Type",
-                        ["value"] = caughtFish.name,
-                        ["inline"] = true
-                    },
-                    {
-                        ["name"] = "Weight",
-                        ["value"] = weight .. " kg",
-                        ["inline"] = true
-                    },
-                    {
-                        ["name"] = "Item",
-                        ["value"] = caughtFish.item,
-                        ["inline"] = true
-                    }
-                }
-                SendDiscordWebhook(Config.Webhooks.fishing, message, fields)
-            end
-        else
-            TriggerClientEvent('ardenhub_fishing:notify', source, 'Fishing', 
-                Config.Notifications.inventoryFull, 
-                3000, 'error', true)
+        local notifMsg = string.format(Config.Notifications.caughtFish, caughtFish.name, weight)
+        if caughtFish.rarity == "leggendario" or caughtFish.rarity == "raro" then
+            notifMsg = string.format(Config.Notifications.caughtRareFish, caughtFish.name, weight)
         end
+        
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Pesca',
+            description = notifMsg,
+            type = 'success',
+            duration = 5000
+        })
+        
+        if Config.Webhooks.enabled and Config.Webhooks.logFishing then
+            SendDiscordLog('fishing', {
+                title = '🎣 Pesce Pescato',
+                description = GetPlayerName(source) .. ' ha pescato un pesce',
+                fields = {
+                    {name = 'Giocatore', value = GetPlayerName(source) .. ' (ID: ' .. source .. ')', inline = false},
+                    {name = 'Pesce', value = caughtFish.name, inline = true},
+                    {name = 'Peso', value = weight .. ' kg', inline = true},
+                    {name = 'Rarità', value = caughtFish.rarity, inline = true}
+                }
+            })
+        end
+    else
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Pesca',
+            description = Config.Notifications.inventoryFull,
+            type = 'error'
+        })
     end
 end)
 
--- Sell fish event
-RegisterServerEvent('ardenhub_fishing:sellFish')
-AddEventHandler('ardenhub_fishing:sellFish', function()
+-- ═══════════════════════════════════════════════════════════
+-- EVENT: VENDI PESCE
+-- ═══════════════════════════════════════════════════════════
+RegisterNetEvent('ardenhub_fishing:sellFish', function()
+    local source = source
     local xPlayer = ESX.GetPlayerFromId(source)
-    local totalEarnings = 0
-    local fishCount = 0
-    local soldFishDetails = {}
+    if not xPlayer then return end
+    
+    local totalMoney = 0
+    local totalFish = 0
+    local soldItems = {}
+    
+    local hour = tonumber(os.date("%H"))
+    local priceMultiplier = 1.0
+    local isNight = false
+    
+    if Config.FishSeller.dynamicPricing.enabled then
+        if hour >= 22 or hour < 6 then
+            priceMultiplier = Config.FishSeller.dynamicPricing.nightBonus
+            isNight = true
+        end
+    end
     
     for _, fish in ipairs(Config.FishTypes) do
-        local fishItem = xPlayer.getInventoryItem(fish.item)
+        local item = xPlayer.getInventoryItem(fish.item)
         
-        if fishItem and fishItem.count > 0 then
-            local count = fishItem.count
-            fishCount = fishCount + count
+        if item and item.count > 0 then
+            local count = item.count
+            local basePrice = math.random(fish.price.min, fish.price.max)
+            local finalPrice = math.floor(basePrice * priceMultiplier)
+            local totalPrice = finalPrice * count
             
-            -- Calculate price based on fish type
-            local price = math.random(fish.price.min, fish.price.max) * count
-            totalEarnings = totalEarnings + price
+            totalMoney = totalMoney + totalPrice
+            totalFish = totalFish + count
             
-            -- Add details for logging
-            table.insert(soldFishDetails, {
+            table.insert(soldItems, {
                 name = fish.name,
                 count = count,
-                price = price
+                price = totalPrice
             })
             
-            -- Remove fish from inventory
             xPlayer.removeInventoryItem(fish.item, count)
         end
     end
     
-    if fishCount > 0 then
-        -- Add money to player
-        xPlayer.addMoney(totalEarnings)
+    if totalFish > 0 then
+        xPlayer.addMoney(totalMoney)
         
-        TriggerClientEvent('ardenhub_fishing:notify', source, 'Fish Market', 
-            string.format(Config.Notifications.soldFish, fishCount, totalEarnings), 
-            3000, 'success', true)
+        local notifMsg = string.format(Config.Notifications.soldFish, totalFish, totalMoney)
+        if isNight then
+            notifMsg = notifMsg .. "\n" .. Config.Notifications.nightBonus
+        end
+        
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Mercato del Pesce',
+            description = notifMsg,
+            type = 'success',
+            duration = 5000
+        })
+        
+   
+        if Config.Webhooks.enabled and Config.Webhooks.logSelling then
+            local fields = {
+                {name = 'Giocatore', value = GetPlayerName(source) .. ' (ID: ' .. source .. ')', inline = false},
+                {name = 'Totale Pesci', value = tostring(totalFish), inline = true},
+                {name = 'Guadagno', value = '$' .. totalMoney, inline = true}
+            }
             
-        if Config.Webhooks.enabled then
-            local playerName = GetPlayerName(source)
-            local message = "**" .. playerName .. "** (ID: " .. source .. ") sold " .. fishCount .. " fish for $" .. totalEarnings
+            if isNight then
+                table.insert(fields, {name = 'Bonus Notturno', value = 'Attivo (+20%)', inline = true})
+            end
             
-            local fields = {}
-            for _, fishDetail in ipairs(soldFishDetails) do
+            for _, item in ipairs(soldItems) do
                 table.insert(fields, {
-                    ["name"] = fishDetail.name,
-                    ["value"] = fishDetail.count .. " x $" .. math.floor(fishDetail.price / fishDetail.count) .. " = $" .. fishDetail.price,
-                    ["inline"] = true
+                    name = item.name, 
+                    value = item.count .. 'x = $' .. item.price, 
+                    inline = true
                 })
             end
             
-            SendDiscordWebhook(Config.Webhooks.selling, message, fields)
+            SendDiscordLog('selling', {
+                title = '💰 Vendita Pesce',
+                description = GetPlayerName(source) .. ' ha venduto del pesce',
+                fields = fields
+            })
         end
     else
-        TriggerClientEvent('ardenhub_fishing:notify', source, 'Fish Market', 
-            Config.Notifications.noFishToSell, 
-            3000, 'error', true)
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Mercato del Pesce',
+            description = Config.Notifications.noFishToSell,
+            type = 'error'
+        })
     end
 end)
 
--- Buy item event
-RegisterServerEvent('ardenhub_fishing:buyItem')
-AddEventHandler('ardenhub_fishing:buyItem', function(itemName, price)
+-- ═══════════════════════════════════════════════════════════
+-- EVENT: ACQUISTA ITEM
+-- ═══════════════════════════════════════════════════════════
+RegisterNetEvent('ardenhub_fishing:buyItem', function(itemName, price, amount)
+    local source = source
     local xPlayer = ESX.GetPlayerFromId(source)
+    if not xPlayer then return end
     
-    -- Check if player has enough money
+    amount = amount or 1
+    
+    local validItem = false
+    for _, shopItem in ipairs(Config.FishingShop.items) do
+        if shopItem.name == itemName then
+            validItem = true
+            break
+        end
+    end
+    
+    if not validItem then
+        return
+    end
+    
     if xPlayer.getMoney() >= price then
-        if xPlayer.canCarryItem(itemName, 1) then
-            -- Remove money and add item
+        if xPlayer.canCarryItem(itemName, amount) then
             xPlayer.removeMoney(price)
-            xPlayer.addInventoryItem(itemName, 1)
+            xPlayer.addInventoryItem(itemName, amount)
             
-            TriggerClientEvent('ardenhub_fishing:notify', source, 'Fishing Shop', 
-                'You bought an item for $' .. price, 
-                3000, 'success', true)
-                
-            if Config.Webhooks.enabled then
-                local playerName = GetPlayerName(source)
-                local message = "**" .. playerName .. "** (ID: " .. source .. ") bought " .. itemName .. " for $" .. price
-                
-                local fields = {
-                    {
-                        ["name"] = "Item",
-                        ["value"] = itemName,
-                        ["inline"] = true
-                    },
-                    {
-                        ["name"] = "Price",
-                        ["value"] = "$" .. price,
-                        ["inline"] = true
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = 'Negozio di Pesca',
+                description = string.format(Config.Notifications.purchaseSuccess, amount .. 'x ' .. itemName),
+                type = 'success'
+            })
+            
+            if Config.Webhooks.enabled and Config.Webhooks.logPurchases then
+                SendDiscordLog('shop', {
+                    title = '🏪 Acquisto Negozio',
+                    description = GetPlayerName(source) .. ' ha acquistato un item',
+                    fields = {
+                        {name = 'Giocatore', value = GetPlayerName(source) .. ' (ID: ' .. source .. ')', inline = false},
+                        {name = 'Item', value = itemName, inline = true},
+                        {name = 'Quantità', value = tostring(amount), inline = true},
+                        {name = 'Prezzo', value = '$' .. price, inline = true}
                     }
-                }
-                
-                SendDiscordWebhook(Config.Webhooks.fishing, message, fields)
+                })
             end
         else
-            TriggerClientEvent('ardenhub_fishing:notify', source, 'Fishing Shop', 
-                Config.Notifications.inventoryFull, 
-                3000, 'error', true)
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = 'Negozio di Pesca',
+                description = Config.Notifications.inventoryFull,
+                type = 'error'
+            })
         end
     else
-        TriggerClientEvent('ardenhub_fishing:notify', source, 'Fishing Shop', 
-            Config.Notifications.notEnoughMoney, 
-            3000, 'error', true)
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Negozio di Pesca',
+            description = Config.Notifications.notEnoughMoney,
+            type = 'error'
+        })
     end
 end)
+
+-- ═══════════════════════════════════════════════════════════
+-- CLEANUP
+-- ═══════════════════════════════════════════════════════════
+AddEventHandler('playerDropped', function()
+    local source = source
+    local identifier = GetPlayerIdentifier(source, 0)
+    
+    if playerActions[identifier] then
+        playerActions[identifier] = nil
+    end
+end)
+
+print('^2[ARDENHUB Fishing]^7 Script caricato correttamente!')

@@ -1,9 +1,9 @@
 fx_version 'cerulean'
 game 'gta5'
-lua54 'yes'
 author 'arduinodenis.it'
-description 'ArdenHub Fishing Script with ESX and ox_lib -- discord.gg/s9bjshtmjG'
-version '1.0.0'
+description 'ArDenHub Fishing Script with ESX and ox_lib'
+version '2.0.0'
+lua54 'yes'
 
 shared_scripts {
     '@es_extended/imports.lua',
@@ -16,10 +16,13 @@ client_scripts {
 }
 
 server_scripts {
+    '@oxmysql/lib/MySQL.lua',
     'server/*.lua'
 }
 
 dependencies {
     'es_extended',
-    'ox_lib'
+    'ox_lib',
+    'ox_target',
+    'oxmysql',
 }

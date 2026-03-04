@@ -1,12 +1,21 @@
+-- ═══════════════════════════════════════════════════════════
+-- ARDENHUB FISHING - CLIENT
+-- ═══════════════════════════════════════════════════════════
+
 local ESX = exports["es_extended"]:getSharedObject()
 local isFishing = false
 local currentZone = nil
+local lastFishingTime = 0
+local fishingProp = nil
 
--- Create blips for fishing areas
-Citizen.CreateThread(function()
-    for i, zone in ipairs(Config.FishingZones) do
-        if zone.blip then
-            local blip = AddBlipForCoord(zone.coords)
+-- ═══════════════════════════════════════════════════════════
+-- INIZIALIZZAZIONE BLIPS
+-- ═══════════════════════════════════════════════════════════
+CreateThread(function()
+    
+    for _, zone in ipairs(Config.FishingZones) do
+        if zone.blip and zone.blip.enabled then
+            local blip = AddBlipForCoord(zone.coords.x, zone.coords.y, zone.coords.z)
             SetBlipSprite(blip, zone.blip.sprite)
             SetBlipColour(blip, zone.blip.color)
             SetBlipScale(blip, zone.blip.scale)
@@ -17,77 +26,87 @@ Citizen.CreateThread(function()
         end
     end
     
-    -- Create blip for fish vendor
-    local sellerBlip = AddBlipForCoord(Config.FishSeller.coords.x, Config.FishSeller.coords.y, Config.FishSeller.coords.z)
-    SetBlipSprite(sellerBlip, Config.FishSeller.blip.sprite)
-    SetBlipColour(sellerBlip, Config.FishSeller.blip.color)
-    SetBlipScale(sellerBlip, Config.FishSeller.blip.scale)
-    SetBlipAsShortRange(sellerBlip, true)
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString(Config.FishSeller.blip.label)
-    EndTextCommandSetBlipName(sellerBlip)
     
-    -- Create blip for the fishing store
-    local shopBlip = AddBlipForCoord(Config.FishingShop.coords.x, Config.FishingShop.coords.y, Config.FishingShop.coords.z)
-    SetBlipSprite(shopBlip, Config.FishingShop.blip.sprite)
-    SetBlipColour(shopBlip, Config.FishingShop.blip.color)
-    SetBlipScale(shopBlip, Config.FishingShop.blip.scale)
-    SetBlipAsShortRange(shopBlip, true)
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString(Config.FishingShop.blip.label)
-    EndTextCommandSetBlipName(shopBlip)
-end)
-
--- Create markers for fishing areas
-Citizen.CreateThread(function()
-    while true do
-        Citizen.Wait(0)
-        local playerCoords = GetEntityCoords(PlayerPedId())
-        local isNearZone = false
-        
-        for i, zone in ipairs(Config.FishingZones) do
-            local distance = #(playerCoords - zone.coords)
-            if distance < 100.0 then
-                isNearZone = true
-                DrawMarker(1, -- type the marker
-                    zone.coords.x, zone.coords.y, zone.coords.z - 0.5, -- Position
-                    0.0, 0.0, 0.0, -- Direction
-                    0.0, 0.0, 0.0, -- Rotation
-                    zone.radius * 2.0, zone.radius * 2.0, 1.0, -- Scale
-                    30, 144, 255, 100, -- Color
-                    false, false, 2, nil, nil, false)
-                
-                DrawMarker(6, -- type the marker
-                    zone.coords.x, zone.coords.y, zone.coords.z + 1.0, -- Position
-                    0.0, 0.0, 0.0, -- Direction
-                    270.0, 0.0, 0.0, -- Rotation
-                    1.5, 1.5, 1.5, -- Scale
-                    0, 255, 255, 200, -- Color
-                    false, true, 2, nil, nil, false)
-                
-                -- Add 3D text to indicate the fishing area
-                if distance < 50.0 then
-                    DrawText3D(zone.coords.x, zone.coords.y, zone.coords.z + 1.5, "~b~Zona di Pesca~w~\nPremi ~y~E~w~ per pescare")
-                end
-            end
-        end
-        if not isNearZone then
-            Citizen.Wait(1000)
-        end
+    if Config.FishSeller.blip.enabled then
+        local sellerBlip = AddBlipForCoord(Config.FishSeller.coords.x, Config.FishSeller.coords.y, Config.FishSeller.coords.z)
+        SetBlipSprite(sellerBlip, Config.FishSeller.blip.sprite)
+        SetBlipColour(sellerBlip, Config.FishSeller.blip.color)
+        SetBlipScale(sellerBlip, Config.FishSeller.blip.scale)
+        SetBlipAsShortRange(sellerBlip, true)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString(Config.FishSeller.blip.label)
+        EndTextCommandSetBlipName(sellerBlip)
+    end
+    
+   
+    if Config.FishingShop.blip.enabled then
+        local shopBlip = AddBlipForCoord(Config.FishingShop.coords.x, Config.FishingShop.coords.y, Config.FishingShop.coords.z)
+        SetBlipSprite(shopBlip, Config.FishingShop.blip.sprite)
+        SetBlipColour(shopBlip, Config.FishingShop.blip.color)
+        SetBlipScale(shopBlip, Config.FishingShop.blip.scale)
+        SetBlipAsShortRange(shopBlip, true)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString(Config.FishingShop.blip.label)
+        EndTextCommandSetBlipName(shopBlip)
     end
 end)
 
--- Funzione per disegnare testo 3D nel mondo
+-- ═══════════════════════════════════════════════════════════
+-- MARKERS ZONE DI PESCA
+-- ═══════════════════════════════════════════════════════════
+CreateThread(function()
+    while true do
+        local sleep = 1000
+        local playerPed = PlayerPedId()
+        local playerCoords = GetEntityCoords(playerPed)
+        
+        for _, zone in ipairs(Config.FishingZones) do
+            local distance = #(playerCoords - zone.coords)
+            
+            if distance < 100.0 then
+                sleep = 0
+                
+                
+                DrawMarker(1, 
+                    zone.coords.x, zone.coords.y, zone.coords.z - 1.0,
+                    0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0,
+                    zone.radius * 2.0, zone.radius * 2.0, 1.0,
+                    52, 152, 219, 80,
+                    false, false, 2, nil, nil, false
+                )
+                
+                
+                if distance < zone.radius then
+                    DrawText3D(zone.coords.x, zone.coords.y, zone.coords.z + 1.0, 
+                        "~b~" .. zone.name .. "~w~\nPremi ~g~[E]~w~ per pescare")
+                end
+            end
+        end
+        
+        Wait(sleep)
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- FUNZIONI UTILITY
+-- ═══════════════════════════════════════════════════════════
 function DrawText3D(x, y, z, text)
     local onScreen, _x, _y = World3dToScreen2d(x, y, z)
-    local px, py, pz = table.unpack(GetGameplayCamCoords())
-    local scale = 0.35
+    local camCoords = GetGameplayCamCoords()
+    local distance = #(camCoords - vector3(x, y, z))
+    local scale = (1 / distance) * 2
+    local fov = (1 / GetGameplayCamFov()) * 100
+    scale = scale * fov
     
     if onScreen then
-        SetTextScale(scale, scale)
+        SetTextScale(0.0 * scale, 0.35 * scale)
         SetTextFont(4)
         SetTextProportional(1)
         SetTextColour(255, 255, 255, 215)
+        SetTextDropshadow(0, 0, 0, 0, 255)
+        SetTextEdge(2, 0, 0, 0, 150)
+        SetTextDropShadow()
         SetTextOutline()
         SetTextEntry("STRING")
         SetTextCentre(1)
@@ -96,28 +115,65 @@ function DrawText3D(x, y, z, text)
     end
 end
 
--- Checks whether the player is in a fishing zone.
 function IsInFishingZone()
     local playerCoords = GetEntityCoords(PlayerPedId())
-    for i, zone in ipairs(Config.FishingZones) do
+    
+    for _, zone in ipairs(Config.FishingZones) do
         local distance = #(playerCoords - zone.coords)
         if distance <= zone.radius then
             currentZone = zone
             return true
         end
     end
+    
     currentZone = nil
     return false
 end
 
--- Function to start fishing
+function CanFish()
+    local currentTime = GetGameTimer()
+    if currentTime - lastFishingTime < Config.Fishing.cooldown then
+        return false, Config.Notifications.cooldown
+    end
+    return true, nil
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- FUNZIONE PRINCIPALE PESCA
+-- ═══════════════════════════════════════════════════════════
 function StartFishing()
-    if isFishing then return end
+    if isFishing then
+        lib.notify({
+            title = 'Pesca',
+            description = Config.Notifications.alreadyFishing,
+            type = 'error'
+        })
+        return
+    end
     
-    ESX.TriggerServerCallback('ardenhub_fishing:hasItems', function(hasRod, hasBait)
+    local canFish, errorMsg = CanFish()
+    if not canFish then
+        lib.notify({
+            title = 'Pesca',
+            description = errorMsg,
+            type = 'error'
+        })
+        return
+    end
+    
+    if not IsInFishingZone() then
+        lib.notify({
+            title = 'Pesca',
+            description = Config.Notifications.notInZone,
+            type = 'error'
+        })
+        return
+    end
+    
+    ESX.TriggerServerCallback('ardenhub_fishing:checkItems', function(hasRod, hasBait)
         if not hasRod then
             lib.notify({
-                title = 'Fishing',
+                title = 'Pesca',
                 description = Config.Notifications.noRod,
                 type = 'error'
             })
@@ -126,129 +182,82 @@ function StartFishing()
         
         if not hasBait then
             lib.notify({
-                title = 'Fishing',
+                title = 'Pesca',
                 description = Config.Notifications.noBait,
                 type = 'error'
             })
             return
         end
         
-        if not IsInFishingZone() then
-            lib.notify({
-                title = 'Fishing',
-                description = Config.Notifications.notInZone,
-                type = 'error'
-            })
-            return
-        end
-        
-        -- Start fishing animation
         isFishing = true
+        lastFishingTime = GetGameTimer()
         local playerPed = PlayerPedId()
         
-        -- Request animation dictionary
-        RequestAnimDict("amb@world_human_stand_fishing@idle_a")
-        while not HasAnimDictLoaded("amb@world_human_stand_fishing@idle_a") do
-            Citizen.Wait(100)
+        RequestAnimDict(Config.Fishing.animation.dict)
+        while not HasAnimDictLoaded(Config.Fishing.animation.dict) do
+            Wait(10)
         end
         
-        -- Create fishing rod object
-        local x, y, z = table.unpack(GetEntityCoords(playerPed))
-        local prop = CreateObject(GetHashKey("prop_fishing_rod_01"), x, y, z + 0.2, true, true, true)
-        AttachEntityToEntity(prop, playerPed, GetPedBoneIndex(playerPed, 60309), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, true, true, false, true, 1, true)
+        local propModel = GetHashKey(Config.Fishing.prop.model)
+        RequestModel(propModel)
+        while not HasModelLoaded(propModel) do
+            Wait(10)
+        end
         
-        -- Run animation
-        TaskPlayAnim(playerPed, "amb@world_human_stand_fishing@idle_a", "idle_c", 8.0, -8.0, -1, 1, 0, false, false, false)
+        local coords = GetEntityCoords(playerPed)
+        fishingProp = CreateObject(propModel, coords.x, coords.y, coords.z, true, true, true)
+        AttachEntityToEntity(
+            fishingProp, playerPed, 
+            GetPedBoneIndex(playerPed, Config.Fishing.prop.bone),
+            Config.Fishing.prop.offset.x, Config.Fishing.prop.offset.y, Config.Fishing.prop.offset.z,
+            Config.Fishing.prop.rotation.x, Config.Fishing.prop.rotation.y, Config.Fishing.prop.rotation.z,
+            true, true, false, true, 1, true
+        )
+        
+        TaskPlayAnim(playerPed, Config.Fishing.animation.dict, Config.Fishing.animation.anim, 
+            8.0, -8.0, -1, Config.Fishing.animation.flag, 0, false, false, false)
         
         lib.notify({
-            title = 'Fishing',
+            title = 'Pesca',
             description = Config.Notifications.startFishing,
             type = 'info'
         })
         
-        -- Bait remover
-        TriggerServerEvent('ardenhub_fishing:removeBait')
         
-        -- Skill control using ox_lib
-        local success = lib.skillCheck(Config.SkillCheckDifficulty)
+        local waitTime = math.random(Config.Fishing.waitTime.min, Config.Fishing.waitTime.max)
+        Wait(waitTime)
+        
+        
+        local success = lib.skillCheck(Config.Fishing.skillCheck.difficulty, Config.Fishing.skillCheck.inputs)
+        
+      
+        ClearPedTasks(playerPed)
+        if DoesEntityExist(fishingProp) then
+            DeleteObject(fishingProp)
+            fishingProp = nil
+        end
+        
+        isFishing = false
         
         if success then
-            TriggerServerEvent('ardenhub_fishing:catchFish')
+            TriggerServerEvent('ardenhub_fishing:catchFish', currentZone.rarityBonus)
         else
             lib.notify({
-                title = 'Fishing',
+                title = 'Pesca',
                 description = Config.Notifications.failedCatch,
                 type = 'error'
             })
+            TriggerServerEvent('ardenhub_fishing:consumeBait')
         end
     end)
 end
 
--- Create NPC fish seller
-Citizen.CreateThread(function()
-    local hash = GetHashKey(Config.FishSeller.model)
-    
-    RequestModel(hash)
-    while not HasModelLoaded(hash) do
-        Citizen.Wait(1)
-    end
-    
-    local npc = CreatePed(4, hash, Config.FishSeller.coords.x, Config.FishSeller.coords.y, Config.FishSeller.coords.z - 1.0, Config.FishSeller.coords.w, false, true)
-    SetEntityHeading(npc, Config.FishSeller.coords.w)
-    FreezeEntityPosition(npc, true)
-    SetEntityInvincible(npc, true)
-    SetBlockingOfNonTemporaryEvents(npc, true)
-    
-    -- Add interaction with ox_target
-    exports.ox_target:addLocalEntity(npc, {
-        {
-            name = 'sell_fish',
-            icon = 'fas fa-fish',
-            label = 'Vendita di Pesce',
-            onSelect = function()
-                TriggerServerEvent('ardenhub_fishing:sellFish')
-            end
-        }
-    })
-end)
-
--- Create NPC fishing store
-Citizen.CreateThread(function()
-    local hash = GetHashKey(Config.FishingShop.model)
-    
-    RequestModel(hash)
-    while not HasModelLoaded(hash) do
-        Citizen.Wait(1)
-    end
-    
-    local npc = CreatePed(4, hash, Config.FishingShop.coords.x, Config.FishingShop.coords.y, Config.FishingShop.coords.z - 1.0, Config.FishingShop.coords.w, false, true)
-    SetEntityHeading(npc, Config.FishingShop.coords.w)
-    FreezeEntityPosition(npc, true)
-    SetEntityInvincible(npc, true)
-    SetBlockingOfNonTemporaryEvents(npc, true)
-    
-    -- Add interaction with ox_target
-    exports.ox_target:addLocalEntity(npc, {
-        {
-            name = 'buy_fishing_gear',
-            icon = 'fas fa-shopping-basket',
-            label = 'Negozio di Pesca',
-            onSelect = function()
-                OpenFishingShop()
-            end
-        }
-    })
-end)
-
--- Record command to start fishing
-RegisterCommand('fish', function()
-    StartFishing()
-end, false)
-
--- Register key with ox_lib
+-- ═══════════════════════════════════════════════════════════
+-- KEYBIND PESCA
+-- ═══════════════════════════════════════════════════════════
 lib.addKeybind({
     name = 'start_fishing',
-    description = 'Inizia a Pescare',
+    description = 'Inizia a pescare',
     defaultKey = 'E',
     onPressed = function()
         if IsInFishingZone() and not isFishing then
@@ -257,37 +266,113 @@ lib.addKeybind({
     end
 })
 
--- Function to open the fishing store
+-- ═══════════════════════════════════════════════════════════
+-- NPC VENDITORE PESCE
+-- ═══════════════════════════════════════════════════════════
+CreateThread(function()
+    local modelHash = GetHashKey(Config.FishSeller.model)
+    
+    RequestModel(modelHash)
+    while not HasModelLoaded(modelHash) do
+        Wait(10)
+    end
+    
+    local npc = CreatePed(4, modelHash, 
+        Config.FishSeller.coords.x, 
+        Config.FishSeller.coords.y, 
+        Config.FishSeller.coords.z - 1.0, 
+        Config.FishSeller.coords.w, 
+        false, true)
+    
+    SetEntityHeading(npc, Config.FishSeller.coords.w)
+    FreezeEntityPosition(npc, true)
+    SetEntityInvincible(npc, true)
+    SetBlockingOfNonTemporaryEvents(npc, true)
+    
+    exports.ox_target:addLocalEntity(npc, {
+        {
+            name = 'sell_fish',
+            icon = 'fas fa-fish',
+            label = 'Vendi Pesce',
+            onSelect = function()
+                TriggerServerEvent('ardenhub_fishing:sellFish')
+            end
+        }
+    })
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- NPC NEGOZIO PESCA
+-- ═══════════════════════════════════════════════════════════
+CreateThread(function()
+    local modelHash = GetHashKey(Config.FishingShop.model)
+    
+    RequestModel(modelHash)
+    while not HasModelLoaded(modelHash) do
+        Wait(10)
+    end
+    
+    local npc = CreatePed(4, modelHash, 
+        Config.FishingShop.coords.x, 
+        Config.FishingShop.coords.y, 
+        Config.FishingShop.coords.z - 1.0, 
+        Config.FishingShop.coords.w, 
+        false, true)
+    
+    SetEntityHeading(npc, Config.FishingShop.coords.w)
+    FreezeEntityPosition(npc, true)
+    SetEntityInvincible(npc, true)
+    SetBlockingOfNonTemporaryEvents(npc, true)
+    
+    exports.ox_target:addLocalEntity(npc, {
+        {
+            name = 'fishing_shop',
+            icon = 'fas fa-store',
+            label = 'Apri Negozio',
+            onSelect = function()
+                OpenFishingShop()
+            end
+        }
+    })
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- MENU NEGOZIO PESCA
+-- ═══════════════════════════════════════════════════════════
 function OpenFishingShop()
     local options = {}
     
-    for i, item in ipairs(Config.FishingShop.items) do
+    for _, item in ipairs(Config.FishingShop.items) do
         table.insert(options, {
             title = item.label,
             description = 'Prezzo: $' .. item.price,
             icon = item.icon,
             onSelect = function()
-                TriggerServerEvent('ardenhub_fishing:buyItem', item.name, item.price)
+                local amount = item.amount or 1
+                TriggerServerEvent('ardenhub_fishing:buyItem', item.name, item.price, amount)
             end
         })
     end
     
     lib.registerContext({
-        id = 'fishing_shop_menu',
-        title = 'Negozio di Pesca',
+        id = 'fishing_shop',
+        title = '🏪 Negozio di Pesca',
         options = options
     })
     
-    lib.showContext('fishing_shop_menu')
+    lib.showContext('fishing_shop')
 end
 
--- Event handler for notifications from the server
-RegisterNetEvent('ardenhub_fishing:notify')
-AddEventHandler('ardenhub_fishing:notify', function(title, message, duration, type)
-    lib.notify({
-        title = title,
-        description = message,
-        type = type,
-        duration = duration
-    })
+-- ═══════════════════════════════════════════════════════════
+-- CLEANUP
+-- ═══════════════════════════════════════════════════════════
+AddEventHandler('onResourceStop', function(resourceName)
+    if GetCurrentResourceName() ~= resourceName then return end
+    
+    if DoesEntityExist(fishingProp) then
+        DeleteObject(fishingProp)
+    end
+    
+    local playerPed = PlayerPedId()
+    ClearPedTasks(playerPed)
 end)
